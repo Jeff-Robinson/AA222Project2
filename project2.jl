@@ -1,6 +1,7 @@
 ## Jeff Robinson - jbrobin@stanford.edu ##
 
 using Random
+using Distributions
 
 ## Basis Vector Generator ("Algorithms For Optimization" Algorithm 7.1, Kochenderfer & Wheeler) ##
 basis(i, n) = [k == i ? 1.0 : 0.0 for k in 1:n]
@@ -19,7 +20,8 @@ end
 function P_quad_mod(constraint_values)
     P_quadratic = 0.0
     for i = 1:length(constraint_values)
-        P_quadratic += max(constraint_values[i]+1000, 0.0)^2
+        floor_hgt = 10.0^3
+        P_quadratic += (constraint_values[i] + floor_hgt)^2
     end
     return P_quadratic
 end
@@ -28,7 +30,7 @@ end
 function P_count(constraint_values)
     P_count = 0.0
     for i = 1:length(constraint_values)
-        if constraint_values[i] > 0
+        if constraint_values[i] > 0.0
             P_count += 1.0
         end
     end
@@ -42,23 +44,19 @@ function P_log_barrier(constraint_values)
         if constraint_values[i] >= -1.0 && constraint_values[i] <= 0.0
             P_barrier -= log(-constraint_values[i])
         elseif constraint_values[i] > 0.0
-            # P_barrier = Float64(typemax(Int32))
             P_barrier = Inf
         end
     end
     return P_barrier
 end
 
-## Barrier Penalty, Inequality <= 0 constraints only ##
+## Hard Barrier Penalty, Inequality <= 0 constraints only ##
 function P_hard_barrier(constraint_values)
-    P_barrier = 0.0
-    for i = 1:length(constraint_values)
-        if constraint_values[i] > 0.0
-            # P_barrier = Float64(typemax(Int32))
-            P_barrier = Inf
-        end
+    if any(constraint_values .> 0.0)
+        return Inf
+    else
+        return 0.0
     end
-    return P_barrier
 end
 
 ## Penalty Calculator
@@ -77,6 +75,8 @@ function Penalties(constraints, x, which="log")
     end
     return penalties
 end
+
+
 
 ## Generalized Pattern Search ("Algorithms For Optimization" Algorithm 7.6, Kochenderfer & Wheeler) ##
 # Opportunistic/Dynamically ordered Hooke-Jeeves on quadratic penalty constraint function to find point within feasible set
@@ -119,177 +119,168 @@ end
 
 
 
-## Particle Swarm Optimization ("Algorithms For Optimization" Algorithm 9.11-12, Kochenderfer & Wheeler) ##
-# mutable struct Particle
-#     x
-#     v
-#     x_best
-# end
-# function particle_swarm(f, constraints, x0, pop_size::Integer, max_n_evals; w=1, c1=1, c2=1, ρ=1, γ=2)
-#     num_dims = length(x0)
-#     population = [Particle(x0, zeros(num_dims), x0)]
-#     for i=2:pop_size # create a population from initial point
-#         particle_loc = x0.*randn(num_dims)
-#         push!(population, Particle(particle_loc, zeros(num_dims), particle_loc))
-#     end
-#     x_best, y_best = x0, Inf
-#     n_evals = 0
-#     for P in population # Initialize "best" values by searching population
-#         y = f(P.x) + ρ*Penalties(constraints, P.x)
-#         n_evals += 1
-#         if y < y_best
-#             x_best[:], y_best = P.x, y
-#         end
-#     end
-#     while true
-#         for P in population
-#             r1, r2 = rand(num_dims), rand(num_dims)
-#             P.x += P.v
-#             P.v = w*P.v + c1*r1.*(P.x_best - P.x) + c2*r2.*(x_best - P.x)
-#             y = f(P.x) + ρ*Penalties(constraints, P.x)
-#             if y < y_best
-#                 x_best[:], y_best = P.x, y
-#             end
-#             if y < f(P.x_best) + ρ*Penalties(constraints, P.x_best)
-#                 P.x_best[:] = P.x
-#             end
-
-#             n_evals += 2
-#             if n_evals >= max_n_evals - 2
-#                 return x_best
-#             end
-#         end
-#         # ρ *= γ
-#     end
-#     return x_best
-# end
-
-
-
-## Full-Factorial Sampling Plan ("Algorithms For Optimization" Algorithm 13.1, Kochenderfer & Wheeler) ##
-# function samples_full_factorial(lower_bounds, upper_bounds, sample_counts)
-#     ranges = [range(lower_bounds[i], stop=upper_bounds[i], length=sample_counts[i]) for i = 1:length(lower_bounds)]
-#     collect.(collect(Iterators.product(ranges...)))
-# end
-
-
-
 ## Cross-Entropy Method ("Algorithms For Optimization" Algorithm 8.7, Kochenderfer & Wheeler) ##
-using Distributions
-function cross_entropy_method(f, constraints, P, max_n_evals, num_evals_used, m=100, m_elite=10, ρ=1.0)
-    n_evals = num_evals_used
-    while true
-        # if n_evals == 0 # initialize with full factorial sampling
-        #     num_dims = length(rand(P))
-        #     sample_limit = 3
-        #     num_init_samples = 200
-        #     full_factorial_samples = samples_full_factorial(
-        #         fill(-sample_limit, num_dims), 
-        #         fill(sample_limit, num_dims), 
-        #         fill(Int(round(num_init_samples^(1/num_dims))), num_dims))
-        #     samples = []
-        #     for i=1:length(full_factorial_samples)
-        #         push!(samples, full_factorial_samples[i])
-        #     end
-        # else
-            samples = [rand(P) for i=1:m]
-        # end
+# using Distributions
+# function cross_entropy_method(f, constraints, P, max_n_evals, num_evals_used, m=100, m_elite=10, ρ=1.0)
+#     n_evals = num_evals_used
+#     while true
+#         samples = [rand(P) for i=1:m]
+#         sample_y_vals = []
+#         for i in 1:m
+#             penalty = Penalties(constraints, samples[i], "hard")
+#             push!(sample_y_vals, f(samples[i]) + ρ*penalty)
 
-        sample_y_vals = []
-        for i in 1:m
-            penalty = Penalties(constraints, samples[i], "hard")
-            push!(sample_y_vals, f(samples[i]) + ρ*penalty)
+#             n_evals += 1
+#             if n_evals >= max_n_evals
+#                 break
+#             end
+#         end
+#         infeasible_samples = sample_y_vals .== Inf
+#         if any(infeasible_samples)
+#             deleteat!(samples, findall(infeasible_samples))
+#             deleteat!(sample_y_vals, findall(infeasible_samples))
+#         end
+#         if length(samples) >= 4
+#             order = sortperm(sample_y_vals)
+#             flattened_samples = Array{Float64,2}(undef,length(samples[1]),length(samples))
+#             for i = 1:length(samples)
+#                 flattened_samples[:,i] = samples[i]
+#             end
+#             if length(order) < m_elite
+#                 P = fit(typeof(P), flattened_samples[:,order])
+#             else
+#                 P = fit(typeof(P), flattened_samples[:,order[1:m_elite]])
+#             end
+#         end
 
-            n_evals += 1
-            if n_evals >= max_n_evals
-                break
-            end
-        end
-        infeasible_samples = sample_y_vals .== Inf
-        if any(infeasible_samples)
-            deleteat!(samples, findall(infeasible_samples))
-            deleteat!(sample_y_vals, findall(infeasible_samples))
-        end
-        if length(samples) >= 4
-            order = sortperm(sample_y_vals)
-            flattened_samples = Array{Float64,2}(undef,length(samples[1]),length(samples))
-            for i = 1:length(samples)
-                flattened_samples[:,i] = samples[i]
-            end
-            if length(order) < m_elite
-                P = fit(typeof(P), flattened_samples[:,order])
-            else
-                P = fit(typeof(P), flattened_samples[:,order[1:m_elite]])
-            end
-        end
-
-        if n_evals >= max_n_evals
-            return mean(P)
-        end
-    end
-end
+#         if n_evals >= max_n_evals
+#             return mean(P)
+#         end
+#     end
+# end
 
     
 
 ## Simulated Annealing ("Algorithms For Optimization" Algorithm 8.4, Kochenderfer & Wheeler) ##
-# function simulated_annealing(f, constraints, x, step_size, update_interval, num_evals_used, max_n_evals)
-#     num_dims = length(x)
-#     pos_basis_vectors = [basis(i, num_dims) for i = 1:num_dims]
-#     rng = RandomDevice()
+function simulated_annealing(f, cnstrnts, x, univar_dist, max_n_evals, n_evals_used; 
+    t0 = 100.0, 
+    γ = 0.98,
+    ρ_quad = 1000.0,
+    ρ_count = 1000.0
+    )
 
-#     y = f(x)
-#     n_evals = num_evals_used + 1
-#     x_best, y_best = x, y
-#     k = 0
+    n_dims = length(x)
+    y = f(x)
+    n_evals = n_evals_used + 1
+    x_best = x
+    y_best = y
+    while true
+        xp = x + rand(univar_dist, n_dims)
+        cnstrnt_vals = cnstrnts(xp)
+        # penalties = ρ_quad*P_quad(cnstrnt_vals) + ρ_count*P_count(cnstrnt_vals)
+        penalties = P_quad_mod(cnstrnt_vals)
+        yp = f(xp) + penalties
+        dy = yp - y
+        # t = t0 * log(2)/log(n_evals) # logarithmic schedule
+        t = t0*γ^(n_evals-1) # exponential schedule
+        if dy == 0 || rand() < exp(-dy/t)
+            x = xp
+            y = yp
+        end
+        if yp < y_best
+            x_best = x
+            y_best = y
+        end
+        n_evals += 1
+        if n_evals >= max_n_evals - 1
+            return x_best
+        end
+    end
+end
 
-#     v = fill(step_size, num_dims)
-#     a = zeros(num_dims)
-#     while true
-#         k += 1
-#         # xp = x + rand(T)
-#         for i = 1:num_dims
-#             xp = x + sign(randn(rng))*rand(rng)*v[i]*pos_basis_vectors[i]
-#             penalty = Penalties(constraints, xp, "hard")
-#             yp = f(xp) + penalty
-#             n_evals += 1
-#             dy = yp - y
-#             if dy <= 0 || rand() < exp(-dy/t_fast(k))
-#                 x, y = xp, yp
-#                 a[i] += 1
-#             end
-#             if yp < y_best
-#                 x_best, y_best = xp, yp
-#             end
-#             if n_evals >= max_n_evals - 1
-#                 return x_best
-#             end
-#         end
-#         if k >= update_interval
-#             c = fill(2.0, num_dims)
-#             v = corana_update!(v, a, c, update_interval)
-#             a = zeros(num_dims)
-#         end
-#     end
-# end
 
-## Fast Annealing Schedule for Simulated Annealing ("Algorithms For Optimization" Equation 8.7, Kochenderfer & Wheeler) ##
-# function t_fast(k)
-#     t = 10.0
-#     return t/k
-# end
+
+## Simulated Annealing ("Algorithms For Optimization" Algorithm 8.6, Kochenderfer & Wheeler) ##
+function adaptive_simulated_annealing(f, cnstrnts, x, step_sizes, max_n_evals;
+    step_interval = 20,  # num cycles before Corana step adjustment
+    temperature = 1000,
+    temp_interval = 5,  # num step adjustments before temp adjustment
+    γ = 0.85,  # temp reduction coeff
+    c = fill(2.0, length(x)),  # Corana step scaling factors
+    ρ_quad = 1.0,
+    ρ_count = 1.0,
+    γp = 2.0 # penalty update coeff
+    )
+
+    y = f(x)
+    n_evals = 1
+    # x_best = x
+    # y_best = y
+    x_prev = [x]
+    y_prev = [y]
+    n_evals_prev = [n_evals]
+    n_dims = length(x)
+    rng = RandomDevice()
+    accepted_count = zeros(n_dims)
+    counts_cycles = 0
+    counts_resets = 0
+
+    while true
+        for i in 1:n_dims
+            rand_n1_p1 = sign(randn(rng))*rand(rng)
+            xp = x + basis(i, n_dims)*rand_n1_p1*step_sizes[i]
+            cnstrnt_vals = cnstrnts(xp)
+            penalties = ρ_quad*P_quad(cnstrnt_vals) + 
+                        ρ_count*P_count(cnstrnt_vals)
+            yp = f(xp) + penalties
+            n_evals += 1
+            dy = yp - y
+            # Metropolis Criterion
+            if dy <= 0 || rand(rng) < exp(-dy/temperature)
+                x = xp
+                y = yp
+                accepted_count[i] += 1
+                # if yp < y_best
+                #     x_best = xp
+                #     y_best = yp
+                # end
+                push!(x_prev, x)
+                push!(y_prev, y)
+                push!(n_evals_prev, n_evals)
+            end
+            if n_evals >= max_n_evals - 1
+                return x_prev[findmin(y_prev)[2]], x_prev, y_prev, n_evals_prev
+            end
+        end
+
+        ρ_quad *= γp
+        ρ_count *= γp
+        counts_cycles += 1
+        counts_cycles >= step_interval || continue
+
+        counts_cycles = 0
+        corana_update!(step_sizes, accepted_count, c, step_interval)
+        fill!(accepted_count, 0)
+        counts_resets += 1
+        counts_resets >= temp_interval || continue
+
+        temperature *= γ
+        counts_resets = 0
+    end
+end
 
 ## Corana Update for Simulated Annealing ("Algorithms For Optimization" Algorithm 8.5, Kochenderfer & Wheeler) ##
-# function corana_update!(v, a, c, ns)
-#     for i in 1:length(v)
-#         ai, ci = a[i], c[i]
-#         if ai > 0.6*ns
-#             v[i] *= (1 + ci * (ai/ns - 0.6)/0.4)
-#         elseif ai < 0.4*ns
-#             v[i] /= (1 + ci * (0.4 - ai/ns)/0.4)
-#         end
-#     end
-#     return v
-# end
+function corana_update!(v, a, c, ns)
+    for i in 1:length(v)
+        ai, ci = a[i], c[i]
+        if ai > 0.6*ns
+            v[i] *= (1 + ci * (ai/ns - 0.6)/0.4)
+        elseif ai < 0.4*ns
+            v[i] /= (1 + ci * (0.4 - ai/ns)/0.4)
+        end
+    end
+    return v
+end
 
 
 
@@ -304,37 +295,49 @@ Arguments:
     - `prob`: (String) Name of the problem. So you can use a different strategy for each problem
 """
 function optimize(f, g, c, x0, n, prob)
+    num_dims = length(x0)
+
     ## Find Initial Feasible Point with GPS
     step_size = 1
-    feasible_eval_max = 25
-    if prob == "simple_2"
-        feasible_eval_max = 2
-    end
+    feasible_eval_max = 30
+    # if prob == "simple_2"
+    #     feasible_eval_max = 2
+    # end
     start_point, feasible_points, n_evals_used = generalized_pattern_search(c, x0, step_size, feasible_eval_max)
-    dist_init_scale = MathConstants.golden
-    init_dist = MvNormal(start_point, dist_init_scale*sqrt(sum([start_point[i]^2 for i=1:length(start_point)])))
+    # println(start_point, ",  ",f(start_point))
+    # n_evals_used += 1
+    # dist_init_scale = MathConstants.golden
+    # init_dist = MvNormal(start_point, dist_init_scale*sqrt(sum([start_point[i]^2 for i=1:length(start_point)])))
     # init_dist = MvNormal(start_point, 1)
-    x_best = cross_entropy_method(f, c, init_dist, n, n_evals_used)
-
-
-    ## Initialize with Full Factorial Sampling Plan
-    # init_dist = MvNormal(x0, 1)
-    # x_best = cross_entropy_method(f, c, init_dist, n, 0)
+    # x_best = cross_entropy_method(f, c, init_dist, n, n_evals_used)
 
 
     # println(start_point)
     # x_best = start_point
-    
-    # pop_size = num_dims * 20
-    # x_best = particle_swarm(f, c, x0, pop_size, n)
 
 
     ## Simulated Annealing with Corana Update
-    # sim_anneal_step_size = 1.0
-    # update_interval = 100/length(x0)
+    # sim_anneal_step_size = 2.0
+    # start_point = x0
+    # n_evals_used = 0
+    # update_interval = Integer(round(100/length(x0)))
     # x_best = simulated_annealing(f, c, start_point, sim_anneal_step_size, update_interval, n_evals_used, n)
 
+    # step_sizes = fill(sim_anneal_step_size, num_dims)
+    # x_best, x_prev, y_prev, n_evals_prev = adaptive_simulated_annealing(f, c, start_point, step_sizes, n)
+
+
+    # univar_dist = Chi(3)
+    # univar_dist = Cauchy()
+    univar_dist = Normal()
+    # n_evals_used = 0
+    x_best = simulated_annealing(f, c, start_point, univar_dist, n, n_evals_used)
+
+
+
+    # PyPlot.plot(n_evals_prev, y_prev)
     return x_best
 end
 
 
+# using PyPlot
